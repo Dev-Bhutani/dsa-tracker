@@ -30,18 +30,25 @@ function App() {
   const [hoveredId, setHoveredId] = useState(null);
 
   useEffect(() => {
+    // Safety fallback for hanging loading screen on mobile networks
+    const timer = setTimeout(() => setLoading(false), 5000);
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setQuestions(data.questions || []);
-          setProgress(data.progress || {});
-          setNotes(data.notes || {});
-          setStarred(data.starred || {});
-          setStreak(data.streak || 1);
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setQuestions(data.questions || []);
+            setProgress(data.progress || {});
+            setNotes(data.notes || {});
+            setStarred(data.starred || {});
+            setStreak(data.streak || 1);
+          }
+        } catch (err) {
+          console.error("Firestore Load Error:", err);
         }
       } else {
         setQuestions([]);
@@ -51,8 +58,13 @@ function App() {
         setStreak(0);
       }
       setLoading(false);
+      clearTimeout(timer);
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
   const saveDataToCloud = async (newQ, newProg, newNotes, newStar, newStreak) => {
@@ -72,7 +84,12 @@ function App() {
   };
 
   const handleGoogleLogin = async () => {
-    try { await signInWithPopup(auth, googleProvider); } catch (e) { console.error(e); }
+    try { 
+      await signInWithPopup(auth, googleProvider); 
+    } catch (e) { 
+      console.error(e); 
+      alert("Login Error: Please check Firebase Authorized Domains.");
+    }
   };
 
   const handleLogout = () => signOut(auth);
@@ -82,7 +99,7 @@ function App() {
     if (!user) return alert("Please login first!");
     if (!title.trim() || !topic.trim()) return;
 
-    const newQ = {
+    const newQItem = {
       id: 'q-' + Date.now(),
       title: title.trim(),
       topic: topic.trim(),
@@ -90,7 +107,7 @@ function App() {
       url: url.trim()
     };
 
-    const updatedQuestions = [...questions, newQ];
+    const updatedQuestions = [...questions, newQItem];
     setQuestions(updatedQuestions);
     saveDataToCloud(updatedQuestions, progress, notes, starred, streak);
 
@@ -137,25 +154,20 @@ function App() {
     alert(`Challenge Problem: [${random.topic}] ${random.title} (${random.difficulty})`);
   };
 
-  // Export Backup Function
-
+  // Export Backup Function (Mobile-friendly data URI approach)
   const exportBackup = () => {
     if (!user) return alert("Please login first!");
     const backupData = { questions, progress, notes, starred, streak };
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
     
-    // Safe filename without invalid characters
-    const dateStr = new Date().toISOString().slice(0, 10);
-    a.download = `dsa-tracker-backup-${dateStr}.json`;
-    
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", jsonStr);
+    downloadAnchor.setAttribute("download", `dsa-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
   };
+
   // Import Backup Function
   const importBackup = (e) => {
     const file = e.target.files[0];
@@ -181,6 +193,7 @@ function App() {
       } catch (err) {
         alert("Invalid backup file!");
       }
+      e.target.value = null; // Clear input for mobile retry
     };
     reader.readAsText(file);
   };
@@ -222,7 +235,7 @@ function App() {
     return '#dc3545';
   };
 
-  if (loading) return <div style={{ textAlign: 'center', marginTop: '50px' }}>Loading...</div>;
+  if (loading) return <div style={{ textAlign: 'center', marginTop: '50px', fontSize: '18px', fontWeight: 'bold' }}>Loading DSA Tracker...</div>;
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: theme.bg, padding: '15px', fontFamily: 'Segoe UI, sans-serif', color: theme.text, transition: 'all 0.3s ease' }}>
@@ -233,14 +246,14 @@ function App() {
           <h1 style={{ margin: 0, color: '#1a73e8', fontSize: '20px' }}>DSA Tracker</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button onClick={() => setDarkMode(!darkMode)} style={{ padding: '6px 12px', cursor: 'pointer', background: darkMode ? '#ffc107' : '#343a40', color: darkMode ? '#000' : '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold' }}>
-              {darkMode ? '☀️ Light' : '🌙 Dark'}
+              {darkMode ? 'Light' : 'Dark'}
             </button>
             {user ? (
               <>
                 <span style={{ background: darkMode ? '#2a3b4c' : '#e8f0fe', padding: '5px 10px', borderRadius: '15px', fontWeight: '600', color: '#1a73e8', fontSize: '13px' }}>
                   Streak: {streak} d
                 </span>
-                <img src={user.photoURL} alt="profile" style={{ width: '32px', borderRadius: '50%' }} />
+                {user.photoURL && <img src={user.photoURL} alt="profile" style={{ width: '32px', borderRadius: '50%' }} />}
                 <button onClick={handleLogout} style={{ padding: '6px 12px', cursor: 'pointer', background: '#dc3545', color: 'white', border: 'none', borderRadius: '6px', fontSize: '13px' }}>Logout</button>
               </>
             ) : (
@@ -298,7 +311,7 @@ function App() {
               </form>
             </div>
 
-            {/* Controls Bar: Search, Filters, Random Picker, Backup/Restore */}
+            {/* Controls Bar */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', background: theme.cardBg, padding: '12px 15px', borderRadius: '12px', border: `1px solid ${theme.border}` }}>
               <input type="text" placeholder="Search question or topic..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ flex: '1 1 180px', padding: '7px 10px', borderRadius: '6px', border: `1px solid ${theme.border}`, background: theme.inputBg, color: theme.inputText, fontSize: '13px' }} />
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -320,14 +333,14 @@ function App() {
                 <button onClick={exportBackup} style={{ padding: '7px 12px', background: '#17a2b8', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
                   Export Backup
                 </button>
-                <label style={{ padding: '7px 12px', background: '#6c757d', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
+                <label style={{ padding: '7px 12px', background: '#6c757d', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', display: 'inline-block' }}>
                   Import Backup
                   <input type="file" accept=".json" onChange={importBackup} style={{ display: 'none' }} />
                 </label>
               </div>
             </div>
 
-            {/* Questions List Grouped by Topic */}
+            {/* Questions List */}
             {Object.keys(groupedQuestions).length === 0 ? (
               <div style={{ textAlign: 'center', padding: '30px', background: theme.cardBg, borderRadius: '12px', color: theme.subText, border: `1px solid ${theme.border}` }}>
                 No matching questions found!
@@ -340,8 +353,6 @@ function App() {
 
                 return (
                   <div key={groupTopic} style={{ marginBottom: '20px', background: theme.cardBg, border: `1px solid ${theme.border}`, borderRadius: '12px', overflow: 'hidden' }}>
-                    
-                    {/* Category Header with Individual Progress Bar */}
                     <div style={{ background: darkMode ? '#252525' : '#f8f9fa', padding: '12px 18px', borderBottom: `1px solid ${theme.border}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                         <h3 style={{ margin: 0, fontSize: '15px' }}>{groupTopic}</h3>
@@ -352,14 +363,13 @@ function App() {
                       </div>
                     </div>
 
-                    {/* Questions */}
                     <div style={{ padding: '5px 15px' }}>
                       {topicQs.map((q) => (
                         <div key={q.id} style={{ borderBottom: `1px solid ${theme.border}`, padding: '10px 0' }}>
                           <div 
                             onMouseEnter={() => setHoveredId(q.id)}
                             onMouseLeave={() => setHoveredId(null)}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', padding: '4px 6px', borderRadius: '6px', backgroundColor: hoveredId === q.id ? theme.hoverBg : 'transparent', cursor: 'pointer' }}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', padding: '4px 6px', borderRadius: '6px', backgroundColor: hoveredId === q.id ? theme.hoverBg : 'transparent' }}
                           >
                             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: '1 1 200px', fontSize: '14px' }}>
                               <input type="checkbox" checked={!!progress[q.id]} onChange={() => toggleQuestion(q.id)} style={{ width: '16px', height: '16px', marginRight: '10px', accentColor: '#1a73e8' }} />
@@ -369,36 +379,26 @@ function App() {
                             </label>
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              {/* Difficulty Badge */}
                               <span style={{ fontSize: '10px', fontWeight: 'bold', color: getDiffColor(q.difficulty), border: `1px solid ${getDiffColor(q.difficulty)}`, padding: '2px 6px', borderRadius: '4px' }}>
                                 {q.difficulty}
                               </span>
-
-                              {/* Star/Revision Button */}
                               <button onClick={() => toggleStar(q.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>
                                 {starred[q.id] ? '⭐' : '☆'}
                               </button>
-
-                              {/* Notes Toggle Button */}
                               <button onClick={() => setActiveNotesId(activeNotesId === q.id ? null : q.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}>
                                 📝
                               </button>
-
-                              {/* Problem Link */}
                               {q.url && (
                                 <a href={q.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#1a73e8', textDecoration: 'none', fontWeight: 'bold' }}>Link</a>
                               )}
-
-                              {/* Delete Button */}
                               <button onClick={() => deleteQuestion(q.id)} style={{ background: 'none', border: 'none', color: '#dc3545', cursor: 'pointer', fontSize: '13px' }}>🗑️</button>
                             </div>
                           </div>
 
-                          {/* Collapsible Approach / Notes Input Box */}
                           {activeNotesId === q.id && (
                             <div style={{ marginTop: '8px', padding: '10px', background: darkMode ? '#2a2a2a' : '#f1f3f4', borderRadius: '6px' }}>
                               <textarea
-                                placeholder="Approach / Time Complexity (e.g. O(N) using Hash Map)..."
+                                placeholder="Approach / Time Complexity..."
                                 value={notes[q.id] || ''}
                                 onChange={(e) => handleSaveNote(q.id, e.target.value)}
                                 style={{ width: '100%', height: '50px', background: theme.cardBg, color: theme.inputText, border: `1px solid ${theme.border}`, borderRadius: '4px', padding: '6px', fontSize: '12px', resize: 'vertical' }}
@@ -412,12 +412,13 @@ function App() {
                 );
               })
             )}
-          </>
-        )}
-{/* Footer / Signature */}
+
             <footer style={{ marginTop: '40px', paddingTop: '15px', borderTop: `1px solid ${theme.border}`, textAlign: 'center', fontSize: '13px', color: theme.subText }}>
               Made by <span style={{ color: '#1a73e8', fontWeight: 'bold' }}>Dev Bhutani</span>
             </footer>
+          </>
+        )}
+
       </div>
     </div>
   );
